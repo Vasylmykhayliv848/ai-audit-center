@@ -70,10 +70,13 @@ flowchart TD
 
     subgraph SAFETY["Control & safety layers (watch the pipeline, never repair it)"]
         WD["Watchdog Engine<br/>Is it alive and healthy?"]
-        ST["Self-Test Engine<br/>Does it work correctly?<br/>(in development)"]
+        ST["Self-Test Engine<br/>Does it work correctly?"]
+        LOOP["Security Loop view<br/>20 loop states, 14 boundary checks"]
         ES["Emergency Stop"]
     end
 
+    DEC --> HCC["Human Control Center<br/>scoped, time-limited approval"]
+    HCC --> EVP
     SAFETY -. observes .-> ORC
     SAFETY -. reports to .-> ALR
 ```
@@ -88,14 +91,20 @@ The project is moving step by step from auditing towards safe automation:
 Manual security audit
    → Automated security analysis          (implemented)
    → Controlled security automation       (implemented; real actions gated by policy + approval)
-   → Safe autonomous security loop        (planned)
+   → Autonomous security loop             (implemented as a controlled loop; runs in PLAN mode)
 ```
 
-The response lifecycle of a single incident:
+The **Autonomous Security Loop**, a fully integrated defensive security automation pipeline:
 
 ```text
-Detect → Analyze → Correlate → Assess Risk → Policy → Decision → Evidence
-       → Response → Verify → Rollback / Recovery → Human Review when required
+Detect → Correlate → Assess Risk → Policy → Decide → Respond → Verify → Recover → Resolve
+```
+
+In more detail, for a single incident:
+
+```text
+Detect → Correlate → Risk → Policy → Decision → Human Control → Evidence
+       → Respond → Verify → Rollback / Recovery → Verify → Resolve → Alert → Audit
 ```
 
 ## Features
@@ -107,7 +116,9 @@ Detect → Analyze → Correlate → Assess Risk → Policy → Decision → Evi
 - **Evidence** with integrity hashes, a chain of custody and hash-chained journals.
 - **Verification** that reads the real system state instead of trusting the action's own result.
 - **Rollback** with a three-way state check, and **Recovery** with human review.
-- **Watchdog** health monitoring and a **Self-Test** engine (in development).
+- **Human Control Center**: keyboard-only approvals, scoped to one incident, action and target, time-limited and re-checked at execution.
+- **Watchdog** health monitoring and a **Self-Test** engine.
+- **Autonomous Security Loop** view: the whole pipeline as 20 loop states, proven against the orchestrator's state machine, with 14 security boundaries checked on every run.
 - **Reporting**: HTML dashboards (including a SOC view), a security report, and JSON/CSV/Markdown exports.
 - **Interfaces**: a local, read-only REST API (OpenAPI spec generated from the route table) and a Telegram bot with read-only commands.
 - **Offline by default**: nothing is contacted unless an integration is switched on.
@@ -157,9 +168,9 @@ Statuses below were checked against the source tree and `CHANGELOG.md`.
 | Autonomous Orchestrator | One state machine per incident across all engines | IMPLEMENTED (runs in PLAN mode in the pipeline) |
 | Alerting Engine | One alert model, queue, deduplication, retry, channel health | IMPLEMENTED |
 | Watchdog Engine | Health of the platform itself | IMPLEMENTED |
-| Self-Test Engine | Drives real engine functions with synthetic input | IN DEVELOPMENT |
-| Human Control Center | Approval register and CLI controls exist; a dedicated interface does not | PARTIAL (see below) |
-| Autonomous Security Loop | Continuous detect → respond → verify loop | PLANNED |
+| Self-Test Engine | Drives real engine functions with synthetic input | IMPLEMENTED |
+| Human Control Center | Roles, scoped and time-limited approvals bound to policy and decision, pause / resume, emergency stop (local console) | IMPLEMENTED |
+| Autonomous Security Loop | The whole loop as one view: loop states, proofs, trace, metrics, boundary checks, dry run | IMPLEMENTED (runs in PLAN mode; no real remediation yet) |
 | Final Automation Validation | End-to-end validation of the full automated chain | PLANNED |
 
 ## Automation Engines
@@ -168,6 +179,21 @@ Statuses below were checked against the source tree and `CHANGELOG.md`.
 - **Decision Engine**: decides what *should* happen about an incident, separately from what *may* happen to the machine.
 - **Incident Response Engine**: every action is bound to the decision that authorised it. A backup or restore point is taken before any change. An action above SAFE does not run if the state it would change was never recorded (`EVIDENCE_INSUFFICIENT`).
 - **Autonomous Orchestrator**: 27 states with a fixed transition table and a 21-check execution gate. Circuit breakers work per incident, per target and globally, and only a person can reset them, with a stated reason. Crash recovery never resumes blindly. The journal is append-only and hash-chained. `-Execute` runs only after its self-test passes. In the current configuration, `dry_run` is on, so any real action ends BLOCKED. This is intentional.
+
+## Autonomous Security Loop
+
+The last integration stage (stage 53). It does **not** add another engine: a second state machine or a second policy would be a second authority. It shows the existing engines as one loop and checks that the picture is true.
+
+- **20 loop states**: `DETECTED`, `CORRELATED`, `ASSESSED`, `POLICY_EVALUATED`, `DECIDED`, `WAITING_HUMAN`, `APPROVED`, `REJECTED`, `EVIDENCE_CAPTURED`, `RESPONDING`, `VERIFYING`, `VERIFIED`, `ROLLBACK_PENDING`, `ROLLING_BACK`, `RECOVERY_PENDING`, `RECOVERING`, `RESOLVED`, `FAILED`, `BLOCKED`, `ESCALATED`.
+- **Proven against the orchestrator**: every one of the orchestrator's 140 transitions (27 states) is checked to land on a legal loop transition. `RESOLVED` only after `VERIFIED`; `RESPONDING` only after evidence or an approval; nothing leads back to `RESPONDING`, so an action is never repeated.
+- **14 boundary checks on every run**, against the policy table in code, the syntax tree of the coordinating scripts and the orchestration journal: the loop cannot disable Defender or the firewall, delete logs, evidence or backups, run arbitrary commands or PowerShell, bypass the policy or human control, approve its own action, create persistence, raise privileges, or repeat an action without end. A check that could not run is reported as `UNKNOWN`, never as passed.
+- **Step trace** for every orchestration, with the incident, decision, policy, action, evidence, approval and correlation IDs.
+- **Dry run**: 20 simulated scenarios through the whole loop, including response → failed verification → rollback → recovery → verification. 20 of 20 pass.
+- **Honest metrics**: automation coverage is reported per stage as a numerator over a denominator. On my machine Detection, Correlation, Risk, Policy and Decision are measured; **Response, Verification and Recovery are `NOT_MEASURED`**, because no real remediation has run through the loop yet. No overall percentage is claimed.
+
+```text
+The orchestrator coordinates → the action policy authorises → a person approves
+```
 
 ## Safety Architecture
 
@@ -191,6 +217,8 @@ Further rules:
 Automation with human control is the core principle of the project.
 
 - Approvals are stored in one **approval register**. Each approval is bound to one action, incident, target and plan hash, and can be used only once.
+- An approval is also bound to the hashes of the policy files and of the decision, and has its own window (10 minutes for a security action, 30 for an operational one). If the policy, the decision or the target changes afterwards, the approval is **stale** and no longer counts.
+- `APPROVE_ALL`, `GLOBAL_ALLOW`, `APPROVE_FOREVER` and `BYPASS_POLICY` do not exist as decisions; asking for one is recorded as an attempt. `BLOCKED` stays `BLOCKED` for every role.
 - **Approval is keyboard-only on the local machine.** I decided on purpose not to add remote "approve" buttons (Telegram or API). This keeps the channel token and the approval register as two independent barriers.
 - The orchestrator CLI supports `-Cancel`, `-ForceHumanReview`, `-RequestEvidence` and `-ResetBreaker -Reason "…"`.
 - Every uncertain result (INCONCLUSIVE, TIMEOUT, retry limit) goes to **HUMAN_REVIEW**.
@@ -246,7 +274,7 @@ Response → Verification FAILED → Rollback (approval) → Verification → Re
 
 ## Self-Test
 
-*Status: IN DEVELOPMENT (stage 51).*
+*Status: IMPLEMENTED (stage 51). The `QUICK` profile runs in every audit.*
 
 The Self-Test Engine calls the **real engine functions with synthetic input**, in an isolated worker runspace and a temporary sandbox, and compares their answers with the expected ones:
 
@@ -320,7 +348,7 @@ ai-audit-center/
 
 ## Current Status
 
-- **Version:** 1.9.1 (`config/Version.json`). Development is organised in numbered stages. Stage 50 (Watchdog) is closed, and stage 51 (Self-Test) is in progress.
+- **Version:** 1.9.1 (`config/Version.json`). Development is organised in numbered stages. Stages 51 (Self-Test), 52 (Human Control Center) and 53 (Autonomous Security Loop, the last integration stage) are closed.
 - **Runs on:** my own Windows machine. It has not been deployed in any organisation.
 - **Automation:** real response actions are gated. In the shipped configuration `dry_run` is on, and every action above SAFE_AUTO needs a person's approval. Outside the test harness, no action above SAFE has been executed on the host.
 
@@ -329,6 +357,8 @@ ai-audit-center/
 - The project's own test suites, run through `scripts/Invoke-TestSuite.ps1`. They cover logic tests, per-engine suites (orchestrator, recovery, alerting, watchdog, self-test), response scenarios on the live machine with cleanup, and dashboard JavaScript harnesses.
 - Latest full run of `Invoke-TestSuite.ps1` (27 Sep 2026, `reports/TestReport.json`): 9 suites, 8 passed and 1 warning (the self-diagnostic reports the installation as DEGRADED, which is about the host, not the code). **5,897 assertions passed, 0 failed**. By suite: logic 3993, orchestrator 588, alerting 437, recovery 422, watchdog 378, and 79 live response-scenario checks. The linter reported 0 errors and 0 warnings.
 - Self-Test Engine, FULL profile (27 Sep 2026): **250 of 251** checks passed. The one failure (`ST-QUE-001`) was a real stale job in the queue; the engine reported it and changed nothing.
+- After the Autonomous Security Loop stage (3 Oct 2026), each suite run separately: linter 0 errors / 0 warnings; logic 3984 passed, 1 failed (a stray script in an ignored backups folder, unrelated to the stage); recovery 422/0; orchestrator 588/0; alerting 437/0; watchdog 378/0; Human Control Center 386/0; **Security Loop 385/0**; response scenarios 79/0; dashboard harnesses passed.
+- Self-Test Engine, STANDARD profile (3 Oct 2026): **246 of 249** passed. The 3 failures are known and not caused by the stage: the same stale queue job (`ST-QUE-001`), and two regression checks that read an outdated test report.
 - In the private repository, a GitHub Actions workflow runs a syntax check, the test suite, a full end-to-end pipeline run and a release build on GitHub-hosted Windows runners.
 
 ## Security Principles
@@ -347,7 +377,8 @@ ai-audit-center/
 - Tested on a **single personal machine**. Behaviour in domain or enterprise environments is not validated.
 - **No ML/AI model.** The analysis is rule-based and deterministic, despite the project name.
 - Real remediation paths above SAFE have been exercised **only in the test harness**, not in daily operation.
-- The Self-Test Engine is not finished. The Autonomous Security Loop and Final Automation Validation are not implemented.
+- **No real remediation has run through the Autonomous Security Loop yet.** Its response, verification and recovery stages are proven by simulation and by each engine's own tests, not by daily use. Final Automation Validation is not implemented.
+- No approver role has been assigned on the host yet, so in practice nothing above SAFE_AUTO can be approved today.
 - Open item in `docs/ROADMAP.md`: scheduled runs read a different user registry hive, so some HKCU-based checks can report `UNKNOWN` on scheduled runs.
 - Test results are produced by the project's own suites. There has been no external security review.
 
@@ -357,9 +388,11 @@ ai-audit-center/
 - [x] Correlation → Policy → Decision → Evidence → Response
 - [x] Verification → Rollback → Recovery
 - [x] Autonomous Orchestrator (PLAN mode), Alerting, Watchdog
-- [ ] Self-Test Engine (in development)
-- [ ] Human Control Center as a dedicated local interface
-- [ ] Autonomous Security Loop
+- [x] Self-Test Engine
+- [x] Human Control Center (local console)
+- [x] Autonomous Security Loop (integration, proofs, boundary checks, dry run)
+- [ ] First real, human-approved remediations through the loop
+- [ ] Read-only API / dashboard / bot views of the loop
 - [ ] Final Automation Validation
 - [ ] Fix the scheduled-task registry hive issue
 - [ ] Test on a second clean Windows installation / VM
