@@ -10,7 +10,8 @@ It covers detection, risk analysis, evidence, controlled response, verification,
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server%202016%2B-0078D6?logo=windows&logoColor=white)
 ![Focus](https://img.shields.io/badge/focus-defensive%20security-2E7D32)
 ![Automation](https://img.shields.io/badge/automation-human--controlled-6A1B9A)
-![Status](https://img.shields.io/badge/status-active%20development-F9A825)
+![Status](https://img.shields.io/badge/status-final%20validation%20done%20%C2%B7%20maintenance-F9A825)
+![Validation](https://img.shields.io/badge/final%20validation-PARTIALLY%20VALIDATED-orange)
 ![Source](https://img.shields.io/badge/source-private%20(on%20request)-lightgrey)
 
 </div>
@@ -94,7 +95,7 @@ Manual security audit
    → Autonomous security loop             (implemented as a controlled loop; runs in PLAN mode)
 ```
 
-The **Autonomous Security Loop**, a fully integrated defensive security automation pipeline:
+The **Autonomous Security Loop**, a defensive security automation pipeline with one engine per stage:
 
 ```text
 Detect → Correlate → Assess Risk → Policy → Decide → Respond → Verify → Recover → Resolve
@@ -171,7 +172,7 @@ Statuses below were checked against the source tree and `CHANGELOG.md`.
 | Self-Test Engine | Drives real engine functions with synthetic input | IMPLEMENTED |
 | Human Control Center | Roles, scoped and time-limited approvals bound to policy and decision, pause / resume, emergency stop (local console) | IMPLEMENTED |
 | Autonomous Security Loop | The whole loop as one view: loop states, proofs, trace, metrics, boundary checks, dry run | IMPLEMENTED (runs in PLAN mode; no real remediation yet) |
-| Final Automation Validation | End-to-end validation of the full automated chain | PLANNED |
+| Final Automation Validation | Independent validation of the whole automated chain (stage 54, the final stage) | DONE: result **PARTIALLY_VALIDATED** (see below) |
 
 ## Automation Engines
 
@@ -194,6 +195,66 @@ The last integration stage (stage 53). It does **not** add another engine: a sec
 ```text
 The orchestrator coordinates → the action policy authorises → a person approves
 ```
+
+## Final Automation Validation
+
+The final stage (stage 54, 3–4 Oct 2026). It added no engine and changed no
+code. It measured what the platform really does on its own, and recorded where
+the proof stops. It ran in READ_ONLY / SIMULATION mode with synthetic test data,
+and nothing on Windows was changed. A verified backup was taken first.
+
+**Result: PARTIALLY VALIDATED.** All 13 security invariants pass. The automated
+chain is proven on real runs only from detection up to the decision. Response,
+verification of an action, rollback, recovery and resolution are proven only in
+simulation and on test objects that the test harness creates for itself. No
+real remediation has run yet.
+
+Implemented ≠ validated. Each capability is listed under the strongest proof
+that exists for it:
+
+| Proof | Capabilities |
+|---|---|
+| Validated on real runs | detection, correlation, risk, action policy, decision, evidence, alerting, watchdog, self-test |
+| Validated on synthetic input or harness-owned test objects only | response, verification of an action, rollback, human-control revalidation |
+| Validated in simulation only | the full loop from response to resolution, and the rollback- and recovery-failure paths (20 of 20 scenarios, 3 identical repeats) |
+| Partial | recovery (changes to Windows go to a person by design), Human Control Center (no approver role assigned yet), one stuck queue job, one manual hardening path (see Limitations) |
+
+Measured figures. Each one has a stated formula, numerator and denominator:
+
+| Metric | Value | What it counts |
+|---|---|---|
+| Automation coverage | **71.4 %** | 10 of 14 lifecycle capabilities that run unattended and are confirmed on real runs |
+| Technical automation | **85.7 %** | 12 of 14 that have a mechanism able to run without a person |
+| Safe autonomous automation | **18.2 %** | 8 of 44 action types may run unattended, and all 8 are reads or changes to the tool's own state. 0 of 8 Windows-changing actions may. With `dry_run` on, nothing runs unattended |
+| Autonomy level | **2 of 4** (partially automated) | level 3 is not claimed, because it has not been shown on a real incident |
+| Security invariants | **13 / 13 PASS** | cannot disable Defender or the firewall, delete logs, evidence or backups, access credentials, escalate privileges, create persistence, bypass policy or human control, run arbitrary PowerShell or commands, or approve its own action |
+| Test cases executed | **6,982**: 6,980 passed, 2 failed | 9 test suites plus 136 independent checks. One failure is a real finding (see Limitations), the other is caused by a stray script in a backups folder |
+| Rollback / recovery coverage | not measurable | no real rollback or recovery has happened |
+| Code coverage | not measurable | the project has no coverage instrumentation |
+
+What the independent checks covered:
+
+- **Policy:** safe, dangerous, forbidden and unknown actions; a missing or
+  malformed policy; conflicting policies; expired, stale, replayed and wildcard
+  approvals; approval of a BLOCKED action; a *valid* but hostile policy file.
+- **Human control:** expiry, tampering, wrong target, action or incident, a
+  changed policy or decision, revocation, a corrupt store.
+- **Evidence:** corrupted records, mismatched hashes, missing evidence and
+  incomplete chains.
+- **Verification:** an action that reports success while the state is wrong is
+  FAILED, and an unknown state is INCONCLUSIVE.
+- **Rollback:** an unexpected current state, a missing previous state, a
+  missing backup and an unreadable state are all refused.
+- **Loop protection:** limits, retries, cooldown, timeouts, breakers and
+  recursion depth.
+- **Code:** an AST scan of 329 scripts. There is no `Invoke-Expression`
+  anywhere.
+
+The validation also compared the Self-Test with the independent result. They
+agree on every failure the Self-Test reports. The independent check also found
+one issue that the Self-Test does not cover. Following the rule of not
+trusting a single source, the security result is taken from the independent
+validation.
 
 ## Safety Architecture
 
@@ -348,7 +409,7 @@ ai-audit-center/
 
 ## Current Status
 
-- **Version:** 1.9.1 (`config/Version.json`). Development is organised in numbered stages. Stages 51 (Self-Test), 52 (Human Control Center) and 53 (Autonomous Security Loop, the last integration stage) are closed.
+- **Version:** 1.9.1 (`config/Version.json`). Development was organised in numbered stages. The last one, stage 54 (Final Automation Validation), is closed with the result **PARTIALLY VALIDATED**. No further stages are planned; remaining work is maintenance: bug fixes, security fixes and documentation.
 - **Runs on:** my own Windows machine. It has not been deployed in any organisation.
 - **Automation:** real response actions are gated. In the shipped configuration `dry_run` is on, and every action above SAFE_AUTO needs a person's approval. Outside the test harness, no action above SAFE has been executed on the host.
 
@@ -359,6 +420,23 @@ ai-audit-center/
 - Self-Test Engine, FULL profile (27 Sep 2026): **250 of 251** checks passed. The one failure (`ST-QUE-001`) was a real stale job in the queue; the engine reported it and changed nothing.
 - After the Autonomous Security Loop stage (3 Oct 2026), each suite run separately: linter 0 errors / 0 warnings; logic 3984 passed, 1 failed (a stray script in an ignored backups folder, unrelated to the stage); recovery 422/0; orchestrator 588/0; alerting 437/0; watchdog 378/0; Human Control Center 386/0; **Security Loop 385/0**; response scenarios 79/0; dashboard harnesses passed.
 - Self-Test Engine, STANDARD profile (3 Oct 2026): **246 of 249** passed. The 3 failures are known and not caused by the stage: the same stale queue job (`ST-QUE-001`), and two regression checks that read an outdated test report.
+- Final Automation Validation (3–4 Oct 2026), each suite run separately:
+  - linter: 0 errors / 0 warnings;
+  - logic: 3984 / 1 (the same stray script);
+  - Security Loop: 385 / 0;
+  - Human Control Center: 386 / 0;
+  - Self-Test harness: 186 / 0;
+  - recovery: 422 / 0;
+  - alerting: 437 / 0;
+  - watchdog: 378 / 0;
+  - orchestrator: 588 / 0;
+  - response scenarios: 79 / 0;
+  - dashboard harnesses: passed;
+  - independent checks: **135 / 1** (the 1 is the hardening finding below).
+
+  Self-Test STANDARD in dry run: 245 / 249. All 4 failures match conditions on
+  the host: a watchdog status that had not been refreshed, the stuck queue job,
+  and an outdated test report.
 - In the private repository, a GitHub Actions workflow runs a syntax check, the test suite, a full end-to-end pipeline run and a release build on GitHub-hosted Windows runners.
 
 ## Security Principles
@@ -377,7 +455,9 @@ ai-audit-center/
 - Tested on a **single personal machine**. Behaviour in domain or enterprise environments is not validated.
 - **No ML/AI model.** The analysis is rule-based and deterministic, despite the project name.
 - Real remediation paths above SAFE have been exercised **only in the test harness**, not in daily operation.
-- **No real remediation has run through the Autonomous Security Loop yet.** Its response, verification and recovery stages are proven by simulation and by each engine's own tests, not by daily use. Final Automation Validation is not implemented.
+- **No real remediation has run through the Autonomous Security Loop yet.** Its response, verification and recovery stages are proven by simulation and by each engine's own tests, not by daily use. The final validation therefore ends at PARTIALLY VALIDATED, not higher.
+- **Open finding from the final validation (medium):** a manual, operator-run hardening command applies a value from a local rule file without refusing one that would switch a Defender protection off. The undo path already refuses this. The automated pipeline never runs that command in apply mode. It is reported and not fixed yet.
+- At validation time the Watchdog read CRITICAL because no full pipeline run had happened for about 60 hours. It correctly advised stopping automation. A stale orchestration status still said remediation was allowed, which is a second open finding.
 - No approver role has been assigned on the host yet, so in practice nothing above SAFE_AUTO can be approved today.
 - Open item in `docs/ROADMAP.md`: scheduled runs read a different user registry hive, so some HKCU-based checks can report `UNKNOWN` on scheduled runs.
 - Test results are produced by the project's own suites. There has been no external security review.
@@ -391,9 +471,13 @@ ai-audit-center/
 - [x] Self-Test Engine
 - [x] Human Control Center (local console)
 - [x] Autonomous Security Loop (integration, proofs, boundary checks, dry run)
+- [x] Final Automation Validation (final stage, result: PARTIALLY VALIDATED)
+
+Maintenance only from here; no new stages or engines:
+
+- [ ] Fix the two medium findings from the final validation
 - [ ] First real, human-approved remediations through the loop
 - [ ] Read-only API / dashboard / bot views of the loop
-- [ ] Final Automation Validation
 - [ ] Fix the scheduled-task registry hive issue
 - [ ] Test on a second clean Windows installation / VM
 
