@@ -209,6 +209,47 @@ verification of an action, rollback, recovery and resolution are proven only in
 simulation and on test objects that the test harness creates for itself. No
 real remediation has run yet.
 
+### The answer in numbers
+
+AI Audit Center is currently **85.7 % technically automated** and **55.6 %
+autonomously capable** for defensive cybersecurity workflows, based on the
+validated tests.
+
+- **Final validated automation level: 71.4 %.** 10 of 14 lifecycle
+  capabilities are automated *and* confirmed on real runs.
+- **Final validated autonomous level: 55.6 %.** 5 of 9 loop stages ran without
+  a person on real data.
+- **Still needs a person: 48.1 %** of real incidents (13 of 27 orchestrations
+  ended in human review).
+
+| Metric | Result | Numerator / denominator | Formula |
+|---|---:|---|---|
+| Technical automation | **85.7 %** | 12 / 14 | capabilities whose mechanism runs with no human input and passes its tests / applicable lifecycle capabilities |
+| Safe automation | **83.3 %** | 10 / 12 | automated capabilities that actually run unattended under the shipped policy (policy gate, evidence, verification, `dry_run`) and are confirmed on real runs / technically automated capabilities |
+| Autonomous security | **55.6 %** | 5 / 9 | loop stages passed without a person on real data (detect, correlate, risk, policy, decision) / 9 stages |
+| Human-required | **48.1 %** | 13 / 27 | real orchestrations ending in human review / all real orchestrations (by action type: 15 of 44 need approval) |
+| Verified automation | **83.3 %** | 10 / 12 | automated capabilities confirmed on real machine state / automated capabilities (simulation not counted) |
+| Full loop coverage | **55.6 %** | 5 / 9 | loop stages integrated *and* tested on real runs / 9 stages. All 9 are integrated and pass in simulation |
+| Test coverage | **not measurable** | – | no code-coverage instrumentation. Test pass rate is a different figure: 6,980 / 6,982 = 99.97 % |
+| Security validation | **100 %** | 13 / 13 | security invariants PASS / tested. Two medium findings were open at validation time and were fixed the same day |
+| Stability validation | **98.3 %** | 59 / 60 | recorded pipeline runs without a failed step. Both failed runs in the current window were collisions (schedule, in-place edit), not engine defects |
+
+Against the goal of 95–98 % automation:
+
+- Technical automation is 9.3–12.3 points short.
+- Validated automation is 23.6–26.6 points short.
+- Autonomous security is 44.4 points short of a full loop.
+
+The gap has three sources:
+
+- No real response has run: `dry_run` is on, and every Windows-changing action
+  needs approval by a code ceiling.
+- Rollback and recovery of Windows changes go to a person by design.
+- No approver role is assigned yet.
+
+Most of this gap is a deliberate safety choice, not missing code. Closing it
+would mean letting the tool change Windows without a person.
+
 Implemented ≠ validated. Each capability is listed under the strongest proof
 that exists for it:
 
@@ -225,7 +266,7 @@ Measured figures. Each one has a stated formula, numerator and denominator:
 |---|---|---|
 | Automation coverage | **71.4 %** | 10 of 14 lifecycle capabilities that run unattended and are confirmed on real runs |
 | Technical automation | **85.7 %** | 12 of 14 that have a mechanism able to run without a person |
-| Safe autonomous automation | **18.2 %** | 8 of 44 action types may run unattended, and all 8 are reads or changes to the tool's own state. 0 of 8 Windows-changing actions may. With `dry_run` on, nothing runs unattended |
+| Unattended action types | **18.2 %** | 8 of 44 action types may run unattended, and all 8 are reads or changes to the tool's own state. 0 of 8 Windows-changing actions may. With `dry_run` on, nothing runs unattended |
 | Autonomy level | **2 of 4** (partially automated) | level 3 is not claimed, because it has not been shown on a real incident |
 | Security invariants | **13 / 13 PASS** | cannot disable Defender or the firewall, delete logs, evidence or backups, access credentials, escalate privileges, create persistence, bypass policy or human control, run arbitrary PowerShell or commands, or approve its own action |
 | Test cases executed | **6,982**: 6,980 passed, 2 failed | 9 test suites plus 136 independent checks. One failure is a real finding (see Limitations), the other is caused by a stray script in a backups folder |
@@ -457,7 +498,23 @@ ai-audit-center/
 - Real remediation paths above SAFE have been exercised **only in the test harness**, not in daily operation.
 - **No real remediation has run through the Autonomous Security Loop yet.** Its response, verification and recovery stages are proven by simulation and by each engine's own tests, not by daily use. The final validation therefore ends at PARTIALLY VALIDATED, not higher.
 - **Finding from the final validation (medium), fixed on 4 Oct 2026:** a manual, operator-run hardening command applied a value from a local rule file on trust. A tampered rule could therefore have switched a Defender protection off or weakened another setting; the undo path already refused this. Each hardening mechanism now declares in code the only protective values it may write. Any other value is refused in the plan and again at the write, and the comparison checks the value's type, so the text "false" cannot pass for a boolean. The rule loader reports such a value but keeps the compliance check. 20 new test cases cover this, and the other suites pass. Still open: the rule file has no integrity hash, so a tampered file can misreport compliance but cannot weaken a setting.
-- At validation time the Watchdog read CRITICAL because no full pipeline run had happened for about 60 hours. It correctly advised stopping automation. A stale orchestration status still said remediation was allowed. This is still an open finding.
+- **Second finding from the final validation (medium), fixed on 4 Oct 2026:**
+  at validation time the Watchdog read CRITICAL because no full pipeline run
+  had happened for about 60 hours, and it correctly advised stopping
+  automation. A stale orchestration status still said remediation was allowed.
+  - Nothing that acts ever read that status: the orchestrator re-checks engine
+    health live before every action. But the Watchdog, the SOC page and the
+    bot presented the old snapshot as current. They now treat a status older
+    than 50 hours as stale.
+  - The cause of the gap was a schedule collision: the 4-hourly quick check
+    took the full audit's 09:00 slot. The quick check moves to 09:30 without
+    catch-up; that change waits for an elevated re-registration of the task.
+  - New tests cover this, and the Watchdog's security invariants went from
+    24 / 26 to 26 / 26.
+- During that maintenance, a scheduled run loaded a source file while I was
+  editing it in place. Four pipeline steps failed closed: no decisions were
+  made and nothing was changed. The run is recorded as a failure in the
+  stability figure above.
 - No approver role has been assigned on the host yet, so in practice nothing above SAFE_AUTO can be approved today.
 - Open item in `docs/ROADMAP.md`: scheduled runs read a different user registry hive, so some HKCU-based checks can report `UNKNOWN` on scheduled runs.
 - Test results are produced by the project's own suites. There has been no external security review.
@@ -476,7 +533,7 @@ ai-audit-center/
 Maintenance only from here; no new stages or engines:
 
 - [x] Fix the hardening-value finding from the final validation
-- [ ] Fix the stale-watchdog / orchestration-status finding
+- [x] Fix the stale-watchdog / orchestration-status finding (re-registering the quick-check task needs an elevated session)
 - [ ] First real, human-approved remediations through the loop
 - [ ] Read-only API / dashboard / bot views of the loop
 - [ ] Fix the scheduled-task registry hive issue
