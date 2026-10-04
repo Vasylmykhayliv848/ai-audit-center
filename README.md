@@ -217,7 +217,7 @@ that exists for it:
 | Validated on real runs | detection, correlation, risk, action policy, decision, evidence, alerting, watchdog, self-test |
 | Validated on synthetic input or harness-owned test objects only | response, verification of an action, rollback, human-control revalidation |
 | Validated in simulation only | the full loop from response to resolution, and the rollback- and recovery-failure paths (20 of 20 scenarios, 3 identical repeats) |
-| Partial | recovery (changes to Windows go to a person by design), Human Control Center (no approver role assigned yet), one stuck queue job, one manual hardening path (see Limitations) |
+| Partial | recovery (changes to Windows go to a person by design), Human Control Center (no approver role assigned yet), one stuck queue job. One manual hardening path was also partial; it was fixed after the validation (see Limitations) |
 
 Measured figures. Each one has a stated formula, numerator and denominator:
 
@@ -432,7 +432,7 @@ ai-audit-center/
   - orchestrator: 588 / 0;
   - response scenarios: 79 / 0;
   - dashboard harnesses: passed;
-  - independent checks: **135 / 1** (the 1 is the hardening finding below).
+  - independent checks: **135 / 1** (the 1 is the hardening finding below, since fixed).
 
   Self-Test STANDARD in dry run: 245 / 249. All 4 failures match conditions on
   the host: a watchdog status that had not been refreshed, the stuck queue job,
@@ -456,8 +456,8 @@ ai-audit-center/
 - **No ML/AI model.** The analysis is rule-based and deterministic, despite the project name.
 - Real remediation paths above SAFE have been exercised **only in the test harness**, not in daily operation.
 - **No real remediation has run through the Autonomous Security Loop yet.** Its response, verification and recovery stages are proven by simulation and by each engine's own tests, not by daily use. The final validation therefore ends at PARTIALLY VALIDATED, not higher.
-- **Open finding from the final validation (medium):** a manual, operator-run hardening command applies a value from a local rule file without refusing one that would switch a Defender protection off. The undo path already refuses this. The automated pipeline never runs that command in apply mode. It is reported and not fixed yet.
-- At validation time the Watchdog read CRITICAL because no full pipeline run had happened for about 60 hours. It correctly advised stopping automation. A stale orchestration status still said remediation was allowed, which is a second open finding.
+- **Finding from the final validation (medium), fixed on 4 Oct 2026:** a manual, operator-run hardening command applied a value from a local rule file on trust. A tampered rule could therefore have switched a Defender protection off or weakened another setting; the undo path already refused this. Each hardening mechanism now declares in code the only protective values it may write. Any other value is refused in the plan and again at the write, and the comparison checks the value's type, so the text "false" cannot pass for a boolean. The rule loader reports such a value but keeps the compliance check. 20 new test cases cover this, and the other suites pass. Still open: the rule file has no integrity hash, so a tampered file can misreport compliance but cannot weaken a setting.
+- At validation time the Watchdog read CRITICAL because no full pipeline run had happened for about 60 hours. It correctly advised stopping automation. A stale orchestration status still said remediation was allowed. This is still an open finding.
 - No approver role has been assigned on the host yet, so in practice nothing above SAFE_AUTO can be approved today.
 - Open item in `docs/ROADMAP.md`: scheduled runs read a different user registry hive, so some HKCU-based checks can report `UNKNOWN` on scheduled runs.
 - Test results are produced by the project's own suites. There has been no external security review.
@@ -475,7 +475,8 @@ ai-audit-center/
 
 Maintenance only from here; no new stages or engines:
 
-- [ ] Fix the two medium findings from the final validation
+- [x] Fix the hardening-value finding from the final validation
+- [ ] Fix the stale-watchdog / orchestration-status finding
 - [ ] First real, human-approved remediations through the loop
 - [ ] Read-only API / dashboard / bot views of the loop
 - [ ] Fix the scheduled-task registry hive issue
